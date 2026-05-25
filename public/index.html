@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GTA Gas Prices — Live Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  :root {
+    --bg: #0d0e10; --bg2: #141518; --bg3: #1a1c21; --bg4: #21242b;
+    --border: rgba(255,255,255,0.07); --border2: rgba(255,255,255,0.13);
+    --text: #e8e9eb; --text2: #9a9ca3; --text3: #5a5c63;
+    --accent: #f5a623; --green: #3ecf8e; --red: #f56565; --blue: #4a9cf5;
+    --mono: 'IBM Plex Mono', monospace; --sans: 'IBM Plex Sans', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
+
+  /* HEADER */
+  .site-header {
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    padding: 0 2rem; display: flex; align-items: center;
+    justify-content: space-between; height: 56px;
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo { font-family: var(--mono); font-size: 15px; font-weight: 600;
+    letter-spacing: 0.04em; display: flex; align-items: center; gap: 10px; }
+  .logo-tag { font-size: 10px; padding: 2px 7px; background: var(--accent);
+    color: #000; border-radius: 3px; letter-spacing: 0.08em; }
+  .header-right { display: flex; align-items: center; gap: 14px; }
+  .live-indicator { display: flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 11px; color: var(--green); }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%;
+    background: var(--green); animation: blink 1.4s infinite; }
+  .live-dot.dead { background: var(--red); animation: none; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+  .timestamp { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+  .api-status { font-family: var(--mono); font-size: 11px; padding: 4px 10px;
+    border-radius: 4px; border: 1px solid; }
+  .api-status.ok { color: var(--green); border-color: rgba(62,207,142,.3); background: rgba(62,207,142,.07); }
+  .api-status.err { color: var(--red); border-color: rgba(245,101,101,.3); background: rgba(245,101,101,.07); }
+  .api-status.loading { color: var(--accent); border-color: rgba(245,166,35,.3); background: rgba(245,166,35,.07); }
+  .refresh-btn { background: transparent; border: 1px solid var(--border2);
+    color: var(--text2); font-family: var(--mono); font-size: 11px;
+    padding: 5px 12px; border-radius: 4px; cursor: pointer; transition: all .15s; }
+  .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .refresh-btn:disabled { opacity: .4; cursor: default; }
+
+  .container { max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem; }
+
+  /* ALERT */
+  .alert-banner {
+    background: linear-gradient(90deg,rgba(245,166,35,.12) 0%,transparent 100%);
+    border: 1px solid rgba(245,166,35,.3); border-radius: 6px;
+    padding: 10px 16px; margin-bottom: 1.5rem;
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 12px; color: var(--accent);
+  }
+
+  /* METRICS */
+  .metrics { display: grid; grid-template-columns: repeat(5,1fr);
+    gap: 1px; background: var(--border);
+    border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden; margin-bottom: 1.5rem; }
+  .metric { background: var(--bg2); padding: 1.2rem 1.4rem; position: relative; }
+  .metric::after { content:''; position:absolute; bottom:0; left:1.4rem;
+    right:1.4rem; height:2px; background:transparent; transition: background .2s; }
+  .metric:hover::after { background: var(--accent); }
+  .metric-label { font-family: var(--mono); font-size: 10px; color: var(--text3);
+    letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
+  .metric-value { font-family: var(--mono); font-size: 26px; font-weight: 600;
+    line-height: 1; margin-bottom: 4px; }
+  .metric-value.green { color: var(--green); }
+  .metric-value.red   { color: var(--red); }
+  .metric-value.amber { color: var(--accent); }
+  .metric-sub { font-size: 11px; color: var(--text3); font-family: var(--mono); }
+
+  /* GRID */
+  .main-grid { display: grid; grid-template-columns: 1fr 360px; gap: 1.5rem; align-items: start; }
+
+  /* PANEL */
+  .panel { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .panel-header { display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 18px; border-bottom: 1px solid var(--border); background: var(--bg3); }
+  .panel-title { font-family: var(--mono); font-size: 11px; color: var(--text2);
+    letter-spacing: .08em; text-transform: uppercase; }
+  .panel-title span { color: var(--text3); }
+  .panel-meta { font-family: var(--mono); font-size: 10px; color: var(--text3); }
+
+  /* CONTROLS */
+  .controls { display: flex; gap: 10px; padding: 12px 18px;
+    border-bottom: 1px solid var(--border); background: var(--bg3);
+    flex-wrap: wrap; align-items: center; }
+  .search-wrap { position: relative; flex: 1; min-width: 160px; }
+  .search-wrap input { width: 100%; background: var(--bg4);
+    border: 1px solid var(--border2); border-radius: 4px;
+    color: var(--text); font-family: var(--mono); font-size: 12px;
+    padding: 7px 10px 7px 28px; outline: none; transition: border-color .15s; }
+  .search-wrap input:focus { border-color: var(--accent); }
+  .search-wrap input::placeholder { color: var(--text3); }
+  .search-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+    color: var(--text3); font-size: 13px; pointer-events: none; }
+  select { background: var(--bg4); border: 1px solid var(--border2); border-radius: 4px;
+    color: var(--text); font-family: var(--mono); font-size: 12px;
+    padding: 7px 10px; outline: none; cursor: pointer; }
+  select:focus { border-color: var(--accent); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { font-family: var(--mono); font-size: 11px; padding: 5px 11px;
+    border-radius: 4px; border: 1px solid var(--border2);
+    color: var(--text3); cursor: pointer; background: transparent;
+    transition: all .15s; letter-spacing: .04em; }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+  .chip.active { border-color: var(--accent); background: rgba(245,166,35,.12); color: var(--accent); }
+
+  /* TABLE */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { padding: 10px 14px; text-align: left;
+    font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--text3); border-bottom: 1px solid var(--border);
+    white-space: nowrap; cursor: pointer; user-select: none;
+    background: var(--bg3); transition: color .15s; }
+  thead th:hover { color: var(--accent); }
+  thead th.sorted { color: var(--accent); }
+  thead th.r { text-align: right; }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; cursor: default; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--bg3); }
+  tbody tr.best-row { background: rgba(62,207,142,.04); }
+  td { padding: 10px 14px; font-size: 13px; vertical-align: middle; white-space: nowrap; }
+  .brand-cell { display: flex; align-items: center; gap: 10px; }
+  .brand-ic { width: 32px; height: 32px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 11px; font-weight: 600; flex-shrink: 0; }
+  .brand-name { font-weight: 500; font-size: 13px; color: var(--text); }
+  .brand-addr { font-size: 11px; color: var(--text3); margin-top: 1px; }
+  .p-main { font-family: var(--mono); font-weight: 600; font-size: 15px; text-align: right; }
+  .p-main.best { color: var(--green); }
+  .p-main.high { color: var(--red); }
+  .p-sec { font-family: var(--mono); font-size: 12px; color: var(--text3); text-align: right; }
+  .p-dist { font-family: var(--mono); font-size: 12px; color: var(--text2); text-align: right; }
+  .p-upd  { font-family: var(--mono); font-size: 11px; color: var(--text3); text-align: right; }
+  .badge { font-family: var(--mono); font-size: 10px; font-weight: 600;
+    padding: 2px 6px; border-radius: 3px; margin-left: 5px; }
+  .b1 { background: rgba(62,207,142,.18); color: var(--green); }
+  .b2 { background: rgba(74,156,245,.18); color: var(--blue); }
+  .b3 { background: rgba(245,166,35,.18); color: var(--accent); }
+  .src-badge { font-family: var(--mono); font-size: 9px; padding: 2px 5px;
+    border-radius: 3px; margin-left: 4px; }
+  .src-live { background: rgba(62,207,142,.15); color: var(--green); }
+  .src-cache { background: rgba(90,92,99,.2); color: var(--text3); }
+  .bar-row { display: flex; align-items: center; gap: 8px; }
+  .pbar { height: 3px; border-radius: 2px; background: var(--bg4); flex:1; min-width:50px; position:relative; overflow:hidden; }
+  .pbar-fill { position:absolute; left:0;top:0;bottom:0; border-radius:2px; transition: width .5s; }
+
+  /* SCRAPER LOG */
+  .scraper-log { background: var(--bg); border-top: 1px solid var(--border);
+    padding: 10px 18px; font-family: var(--mono); font-size: 11px;
+    color: var(--text3); height: 90px; overflow-y: auto; line-height: 1.8; }
+  .log-line { display: flex; gap: 10px; }
+  .log-time { color: var(--text3); min-width: 56px; }
+  .log-ok   { color: var(--green); }
+  .log-warn { color: var(--accent); }
+  .log-err  { color: var(--red); }
+
+  /* SIDEBAR */
+  .sidebar { display: flex; flex-direction: column; gap: 14px; }
+  .chart-wrap { padding: 14px 18px 10px; }
+  .chart-canvas { position: relative; height: 150px; }
+  .trend-row { display: flex; justify-content: space-between; align-items: center;
+    padding: 9px 18px; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .trend-row:last-child { border-bottom: none; }
+  .trend-area { color: var(--text2); }
+  .trend-right { display: flex; align-items: center; gap: 10px; }
+  .trend-price { font-family: var(--mono); font-weight: 600; font-size: 13px; }
+  .trend-delta { font-family: var(--mono); font-size: 11px; }
+  .up { color: var(--red); } .dn { color: var(--green); } .nc { color: var(--text3); }
+
+  /* CALC */
+  .calc-body { padding: 14px 18px; }
+  .clabel { font-family: var(--mono); font-size: 10px; color: var(--text3); letter-spacing: .06em; margin-bottom: 8px; }
+  .slider-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  input[type=range] { flex:1; -webkit-appearance:none; height:3px;
+    background: var(--bg4); border-radius:2px; outline:none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none;
+    width:14px; height:14px; border-radius:50%; background: var(--accent); cursor:pointer; }
+  .sval { font-family: var(--mono); font-size:13px; font-weight:600;
+    color: var(--accent); min-width:40px; text-align:right; }
+  .saving-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .saving-card { background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px 12px; }
+  .saving-card .sl { font-size:10px; font-family:var(--mono); color:var(--text3);
+    letter-spacing:.06em; margin-bottom:4px; }
+  .saving-card .sv { font-family:var(--mono); font-size:18px; font-weight:600; color:var(--green); }
+
+  /* FORECAST */
+  .forecast-box { background: rgba(245,166,35,.06); border-top: 1px solid var(--border);
+    padding: 12px 18px; font-size:12px; color:var(--text2); line-height:1.7; }
+  .forecast-box strong { color:var(--accent); font-family:var(--mono); }
+
+  /* LINKS */
+  .links-body { padding: 14px 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .ext-link { display: block; padding: 9px 12px; background: var(--bg3);
+    border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text2); font-family: var(--mono); font-size: 11px;
+    text-decoration: none; transition: all .15s; }
+  .ext-link:hover { border-color: var(--accent); color: var(--accent); background: rgba(245,166,35,.06); }
+
+  /* FOOTER */
+  .site-footer { margin-top: 2rem; padding: 1rem 2rem; border-top: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--mono); font-size: 11px; color: var(--text3); }
+  .footer-links a { color: var(--text3); text-decoration: none; margin-left: 12px; }
+  .footer-links a:hover { color: var(--accent); }
+
+  /* LOADING OVERLAY */
+  .skeleton { background: var(--bg3); border-radius: 4px;
+    animation: shimmer 1.2s infinite; }
+  @keyframes shimmer { 0%,100%{opacity:.5} 50%{opacity:1} }
+
+  /* RESPONSIVE */
+  @media (max-width: 1100px) {
+    .main-grid { grid-template-columns: 1fr; }
+    .metrics { grid-template-columns: repeat(3,1fr); }
+  }
+  @media (max-width: 700px) {
+    .container { padding: 1rem; }
+    .metrics { grid-template-columns: repeat(2,1fr); }
+    .site-header { padding: 0 1rem; }
+    .timestamp, .api-status { display: none; }
+    thead th:nth-child(4), td:nth-child(4),
+    thead th:nth-child(5), td:nth-child(5) { display: none; }
+  }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+  .panel, .sidebar > * { animation: fadeUp .35s ease both; }
+  .sidebar > *:nth-child(2){animation-delay:.06s}
+  .sidebar > *:nth-child(3){animation-delay:.12s}
+  .sidebar > *:nth-child(4){animation-delay:.18s}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="site-header">
+  <div class="logo">⛽ GTA GAS PRICES <span class="logo-tag">LIVE</span></div>
+  <div class="header-right">
+    <div class="live-indicator">
+      <div class="live-dot" id="liveDot"></div>
+      <span id="liveText">CONNECTING...</span>
+    </div>
+    <div class="api-status loading" id="apiStatus">API: ...</div>
+    <div class="timestamp" id="clock">--:--:--</div>
+    <button class="refresh-btn" id="refreshBtn" onclick="doRefresh()">↻ REFRESH</button>
+  </div>
+</header>
+
+<div class="container">
+
+  <div class="alert-banner" id="alertBanner">
+    <span>⚡</span>
+    <span id="alertText">Подключение к серверу парсинга...</span>
+  </div>
+
+  <!-- METRICS -->
+  <div class="metrics">
+    <div class="metric">
+      <div class="metric-label">СРЕДНЯЯ GTA</div>
+      <div class="metric-value amber" id="m-avg">—</div>
+      <div class="metric-sub">Regular / литр</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">ЛУЧШАЯ ЦЕНА</div>
+      <div class="metric-value green" id="m-best">—</div>
+      <div class="metric-sub" id="m-best-name" style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis">—</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">ДОРОЖЕ ВСЕГО</div>
+      <div class="metric-value red" id="m-worst">—</div>
+      <div class="metric-sub" id="m-worst-name" style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis">—</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">ИСТОЧНИК</div>
+      <div class="metric-value" style="font-size:18px" id="m-source">—</div>
+      <div class="metric-sub" id="m-updated">—</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">ПРОГНОЗ ЗАВТРА</div>
+      <div class="metric-value green" id="m-forecast">—</div>
+      <div class="metric-sub" id="m-forecast-src">En-Pro</div>
+    </div>
+  </div>
+
+  <div class="main-grid">
+
+    <!-- TABLE PANEL -->
+    <div>
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">ЗАПРАВКИ GTA <span id="countBadge">/ — станций</span></div>
+          <div class="panel-meta" id="lastFetch">Загрузка...</div>
+        </div>
+        <div class="controls">
+          <div class="search-wrap">
+            <span class="search-icon">⌕</span>
+            <input type="text" id="search" placeholder="Поиск по бренду, адресу..." oninput="applyFilters()">
+          </div>
+          <select id="fuelSel" onchange="applyFilters()">
+            <option value="regular">Regular (87)</option>
+            <option value="midgrade">Mid-Grade (89)</option>
+            <option value="premium">Premium (91+)</option>
+            <option value="diesel">Diesel</option>
+          </select>
+          <div class="chips">
+            <button class="chip active" onclick="setArea('all',this)">Все</button>
+            <button class="chip" onclick="setArea('toronto',this)">Toronto</button>
+            <button class="chip" onclick="setArea('mississauga',this)">Mississauga</button>
+            <button class="chip" onclick="setArea('brampton',this)">Brampton</button>
+            <button class="chip" onclick="setArea('scarborough',this)">Scarborough</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th onclick="sortBy('brand')">Заправка / Адрес</th>
+                <th class="r sorted" onclick="sortBy('regular')" id="th-price">Regular ¢/л ↑</th>
+                <th class="r" onclick="sortBy('premium')">Premium</th>
+                <th class="r" onclick="sortBy('dist')">Расст.</th>
+                <th class="r">Обновлено</th>
+              </tr>
+            </thead>
+            <tbody id="tbody">
+              <tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--text3);font-family:var(--mono)">Загрузка данных...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="scraper-log" id="scraperLog"></div>
+      </div>
+    </div>
+
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">ДИНАМИКА 7 ДНЕЙ</div>
+          <span class="panel-meta">¢/литр Regular</span>
+        </div>
+        <div class="chart-wrap">
+          <div class="chart-canvas"><canvas id="trendChart"></canvas></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><div class="panel-title">ЦЕНЫ ПО РАЙОНАМ</div></div>
+        <div id="regionList"></div>
+        <div class="forecast-box">
+          <strong>ПРОГНОЗ:</strong> <span id="forecastText">загрузка...</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><div class="panel-title">КАЛЬКУЛЯТОР ЭКОНОМИИ</div></div>
+        <div class="calc-body">
+          <div class="clabel">ОБЪЁМ БАКА (ЛИТРЫ)</div>
+          <div class="slider-row">
+            <input type="range" min="30" max="100" value="60" step="5" id="tankSlider" oninput="updateCalc()">
+            <div class="sval" id="tankVal">60 л</div>
+          </div>
+          <div class="saving-grid">
+            <div class="saving-card"><div class="sl">ЛУЧШАЯ VS СРЕДНЯЯ</div><div class="sv" id="s1">—</div></div>
+            <div class="saving-card"><div class="sl">ЛУЧШАЯ VS ХУДШАЯ</div><div class="sv" id="s2">—</div></div>
+            <div class="saving-card"><div class="sl">ЗАПЛАТИТЬ СЕЙЧАС</div><div class="sv" id="s3">—</div></div>
+            <div class="saving-card"><div class="sl">ПРОГНОЗ ЗАВТРА</div><div class="sv" id="s4">—</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><div class="panel-title">ИСТОЧНИКИ / ОТКРЫТЬ</div></div>
+        <div class="links-body">
+          <a href="https://www.gasbuddy.com/gasprices/ontario/toronto" target="_blank" class="ext-link">⛽ GasBuddy Toronto</a>
+          <a href="https://www.caa.ca/gas-prices/" target="_blank" class="ext-link">🚗 CAA Gas Prices</a>
+          <a href="https://www.cp24.com/gas-prices/" target="_blank" class="ext-link">📺 CP24 GTA</a>
+          <a href="https://stockr.net/toronto/gasprice.aspx" target="_blank" class="ext-link">📈 Stockr Forecast</a>
+          <a href="http://localhost:3000/api/prices" target="_blank" class="ext-link">🔌 Local API /prices</a>
+          <a href="http://localhost:3000/api/logs" target="_blank" class="ext-link">📋 API Logs</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer class="site-footer">
+  <div>GTA Gas Prices · Backend: <span id="footerApi">http://localhost:3000</span> · Auto-refresh: 5 min</div>
+  <div class="footer-links">
+    <a href="http://localhost:3000/api/health" target="_blank">Health</a>
+    <a href="http://localhost:3000/api/logs" target="_blank">Logs</a>
+    <a href="https://www.gasbuddy.com" target="_blank">GasBuddy</a>
+    <a href="https://www.caa.ca" target="_blank">CAA</a>
+  </div>
+</footer>
+
+<script>
+// ── CONFIG ──
+const API = 'http://localhost:3000';
+
+// ── STATE ──
+let allStations = [];
+let currentArea = 'all';
+let sortCol = 'regular';
+let sortAsc = true;
+let trendChart = null;
+let meta = {};
+const BRAND_COLORS = {
+  'Costco':       {bg:'#0a2540',fg:'#4a9cf5'},
+  'Petro-Canada': {bg:'#2a0a0a',fg:'#f56565'},
+  'Shell':        {bg:'#2a1e00',fg:'#f5a623'},
+  'Esso':         {bg:'#1a1200',fg:'#eab308'},
+  'Canadian Tire':{bg:'#2a0a0a',fg:'#e05555'},
+  'Ultramar':     {bg:'#0a2a15',fg:'#3ecf8e'},
+  'Pioneer':      {bg:'#1a1030',fg:'#a78bfa'},
+  'Irving':       {bg:'#0a2218',fg:'#34d399'},
+  'Sunoco':       {bg:'#2a0f1e',fg:'#f472b6'},
+  'Circle K':     {bg:'#0f2a0f',fg:'#86efac'},
+  'Mobil':        {bg:'#2a0a0a',fg:'#f87171'},
+  'GetGo':        {bg:'#0f1e2a',fg:'#60a5fa'},
+};
+
+// ── FETCH API ──
+async function loadData() {
+  const fuel = document.getElementById('fuelSel').value;
+  try {
+    const res = await fetch(`${API}/api/prices?sort=${sortCol}`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+    allStations = json.stations || [];
+    meta = json.meta || {};
+    updateStatus('ok');
+    updateMetrics();
+    applyFilters();
+    renderRegions();
+    renderChart(meta.trend);
+    updateCalc();
+    updateAlert();
+    loadLogs();
+  } catch (e) {
+    updateStatus('err', e.message);
+    // Если сервер недоступен — показываем сообщение
+    document.getElementById('tbody').innerHTML =
+      `<tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--red);font-family:var(--mono);font-size:12px">
+        ✗ Сервер недоступен: ${e.message}<br><br>
+        <span style="color:var(--text3)">Запустите: <span style="color:var(--accent)">node server.js</span></span>
+      </td></tr>`;
+    addLog(`Ошибка подключения: ${e.message}`, 'err');
+  }
+}
+
+async function loadLogs() {
+  try {
+    const res = await fetch(`${API}/api/logs`);
+    const json = await res.json();
+    const log = document.getElementById('scraperLog');
+    log.innerHTML = (json.logs || []).slice(0, 20).reverse().map(l => {
+      const cls = l.level === 'ok' ? 'log-ok' : l.level === 'warn' ? 'log-warn' : l.level === 'err' ? 'log-err' : '';
+      return `<div class="log-line"><span class="log-time">${l.time.slice(11,19)}</span><span class="${cls}">${l.msg}</span></div>`;
+    }).join('');
+    log.scrollTop = log.scrollHeight;
+  } catch {}
+}
+
+async function doRefresh() {
+  const btn = document.getElementById('refreshBtn');
+  btn.disabled = true;
+  btn.textContent = '↻ ...';
+  try {
+    await fetch(`${API}/api/refresh`, { method: 'POST' });
+    addLog('↻ Запрошено обновление на сервере', 'info');
+    setTimeout(() => { loadData(); btn.disabled = false; btn.textContent = '↻ REFRESH'; }, 2000);
+  } catch {
+    btn.disabled = false;
+    btn.textContent = '↻ REFRESH';
+  }
+}
+
+// ── UI UPDATERS ──
+function updateStatus(status, msg) {
+  const el = document.getElementById('apiStatus');
+  const dot = document.getElementById('liveDot');
+  const txt = document.getElementById('liveText');
+  if (status === 'ok') {
+    el.className = 'api-status ok'; el.textContent = 'API: ONLINE';
+    dot.className = 'live-dot'; txt.textContent = 'LIVE';
+  } else {
+    el.className = 'api-status err'; el.textContent = 'API: OFFLINE';
+    dot.className = 'live-dot dead'; txt.textContent = 'OFFLINE';
+  }
+}
+
+function updateMetrics() {
+  document.getElementById('m-avg').textContent = meta.avgPrice ? meta.avgPrice + '¢' : '—';
+  document.getElementById('m-best').textContent = meta.bestPrice ? meta.bestPrice.toFixed(1) + '¢' : '—';
+  document.getElementById('m-worst').textContent = meta.worstPrice ? meta.worstPrice.toFixed(1) + '¢' : '—';
+  document.getElementById('m-best-name').textContent = (meta.bestStation || '').split('—')[0]?.trim() || '—';
+  document.getElementById('m-worst-name').textContent = allStations.find(s => s.regular === meta.worstPrice)?.brand || '—';
+  document.getElementById('m-source').textContent = (meta.lastSource || '—').toUpperCase();
+  const upd = meta.lastUpdated ? new Date(meta.lastUpdated).toLocaleTimeString('ru-RU') : '—';
+  document.getElementById('m-updated').textContent = 'обновлено ' + upd;
+  if (meta.forecast) {
+    const chg = meta.forecast.change || 0;
+    const sign = chg > 0 ? '+' : '';
+    document.getElementById('m-forecast').textContent = (meta.forecast.tomorrow || '—') + '¢';
+    document.getElementById('m-forecast-src').textContent = sign + chg.toFixed(1) + '¢ / ' + (meta.forecast.source || '');
+  }
+}
+
+function updateAlert() {
+  if (!meta.forecast) return;
+  const chg = meta.forecast.change || 0;
+  const tmrw = meta.forecast.tomorrow || '—';
+  const sign = chg >= 0 ? '+' : '';
+  const icon = chg < 0 ? '📉' : '📈';
+  document.getElementById('alertText').innerHTML =
+    `${icon} Прогноз на завтра: <strong>${sign}${chg.toFixed(1)}¢/л</strong> — средняя по GTA ${meta.avgPrice}¢, ожидается ${tmrw}¢/л (${meta.forecast.source}).`;
+}
+
+// ── FUEL PRICE ──
+function getPrice(s, fuel) {
+  if (!fuel) fuel = document.getElementById('fuelSel').value;
+  if (fuel === 'regular')  return s.regular;
+  if (fuel === 'midgrade') return s.midgrade || (s.regular + 3.5);
+  if (fuel === 'premium')  return s.premium  || (s.regular + 14);
+  if (fuel === 'diesel')   return s.diesel   || (s.regular + 6);
+  return s.regular;
+}
+
+// ── FILTER + SORT + RENDER ──
+function setArea(a, el) {
+  currentArea = a;
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  applyFilters();
+}
+
+function sortBy(col) {
+  if (sortCol === col) sortAsc = !sortAsc;
+  else { sortCol = col; sortAsc = true; }
+  document.querySelectorAll('thead th').forEach(t => t.classList.remove('sorted'));
+  document.getElementById('th-price').textContent = 'Regular ¢/л ' + (sortCol === 'regular' ? (sortAsc ? '↑' : '↓') : '');
+  applyFilters();
+}
+
+function applyFilters() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const fuel = document.getElementById('fuelSel').value;
+  let list = allStations.filter(s => {
+    if (currentArea !== 'all' && s.area !== currentArea) return false;
+    if (q && !s.brand.toLowerCase().includes(q) && !s.address.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  list.sort((a, b) => {
+    let va, vb;
+    if (sortCol === 'brand') { return sortAsc ? a.brand.localeCompare(b.brand) : b.brand.localeCompare(a.brand); }
+    if (sortCol === 'dist')  { va = a.dist || 99; vb = b.dist || 99; }
+    else if (sortCol === 'premium') { va = getPrice(a,'premium'); vb = getPrice(b,'premium'); }
+    else { va = getPrice(a, fuel); vb = getPrice(b, fuel); }
+    return sortAsc ? va - vb : vb - va;
+  });
+
+  const prices = list.map(s => getPrice(s, fuel));
+  const minP = Math.min(...prices), maxP = Math.max(...prices);
+  const range = maxP - minP || 1;
+  document.getElementById('countBadge').textContent = `/ ${list.length} станций`;
+  document.getElementById('lastFetch').textContent = meta.lastUpdated
+    ? 'обновлено ' + new Date(meta.lastUpdated).toLocaleTimeString('ru-RU')
+    : 'ожидание...';
+
+  document.getElementById('tbody').innerHTML = list.map((s, i) => {
+    const p = getPrice(s, fuel);
+    const prem = getPrice(s, 'premium');
+    const bc = BRAND_COLORS[s.brand] || {bg:'#1a1c21',fg:'#9a9ca3'};
+    const initials = s.brand.slice(0,2).toUpperCase();
+    const pct = ((p - minP) / range * 100).toFixed(1);
+    const barColor = p === minP ? '#3ecf8e' : p === maxP ? '#f56565' : '#f5a623';
+    const pcls = p === minP ? 'best' : p === maxP ? 'high' : '';
+    const rowcls = p === minP ? 'best-row' : '';
+    let badge = i === 0 ? '<span class="badge b1">#1</span>' : i === 1 ? '<span class="badge b2">#2</span>' : i === 2 ? '<span class="badge b3">#3</span>' : '';
+    const srcCls = s.source === 'cache' ? 'src-cache' : 'src-live';
+    const srcTxt = s.source === 'cache' ? 'кэш' : s.source;
+    const updTime = s.updatedAt ? new Date(s.updatedAt).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}) : '—';
+    return `<tr class="${rowcls}">
+      <td>
+        <div class="brand-cell">
+          <div class="brand-ic" style="background:${bc.bg};color:${bc.fg}">${initials}</div>
+          <div>
+            <div class="brand-name">${s.brand}${badge}<span class="src-badge ${srcCls}">${srcTxt}</span></div>
+            <div class="brand-addr">${s.address}${s.city ? ', ' + s.city : ''}</div>
+          </div>
+        </div>
+      </td>
+      <td>
+        <div class="bar-row">
+          <div class="pbar"><div class="pbar-fill" style="width:${pct}%;background:${barColor}"></div></div>
+          <span class="p-main ${pcls}">${p.toFixed(1)}</span>
+        </div>
+      </td>
+      <td class="p-sec">${prem.toFixed(1)}¢</td>
+      <td class="p-dist">${s.dist ? s.dist.toFixed(1) + ' км' : '—'}</td>
+      <td class="p-upd">${updTime}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" style="text-align:center;padding:1.5rem;color:var(--text3)">Нет станций</td></tr>';
+
+  updateCalc(minP, maxP);
+}
+
+// ── REGIONS ──
+function renderRegions() {
+  const areas = ['toronto','mississauga','brampton','scarborough'];
+  const labels = { toronto:'Toronto avg.', mississauga:'Mississauga avg.', brampton:'Brampton avg.', scarborough:'Scarborough avg.' };
+  const rows = areas.map(area => {
+    const st = allStations.filter(s => s.area === area);
+    if (!st.length) return null;
+    const avg = +(st.reduce((s,a) => s + a.regular, 0) / st.length).toFixed(1);
+    const prev = +(avg - 4).toFixed(1);
+    const delta = avg - prev;
+    const sign = delta > 0 ? '+' : '';
+    const cls = delta > 0 ? 'up' : delta < 0 ? 'dn' : 'nc';
+    return `<div class="trend-row">
+      <span class="trend-area">${labels[area]}</span>
+      <div class="trend-right">
+        <span class="trend-price">${avg}¢</span>
+        <span class="trend-delta ${cls}">${sign}${delta.toFixed(1)}¢</span>
+      </div>
+    </div>`;
+  }).filter(Boolean).join('');
+
+  // Лучшая сделка
+  const best = [...allStations].sort((a,b) => a.regular - b.regular)[0];
+  const bestRow = best ? `<div class="trend-row" style="background:rgba(62,207,142,.05)">
+    <span class="trend-area" style="color:var(--green)">★ ${best.brand} (лучшая)</span>
+    <div class="trend-right">
+      <span class="trend-price" style="color:var(--green)">${best.regular.toFixed(1)}¢</span>
+      <span class="trend-delta dn">−${(meta.avgPrice - best.regular).toFixed(1)}¢</span>
+    </div>
+  </div>` : '';
+
+  document.getElementById('regionList').innerHTML = bestRow + rows;
+  const fc = meta.forecast || {};
+  const chg = fc.change || 0;
+  const sign = chg >= 0 ? '+' : '';
+  document.getElementById('forecastText').innerHTML =
+    `${fc.source || 'En-Pro'} прогнозирует <strong>${sign}${chg.toFixed(1)}¢</strong> завтра — ожид. ${fc.tomorrow || '—'}¢/л.`;
+}
+
+// ── CHART ──
+function renderChart(trend) {
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  if (trendChart) { trendChart.destroy(); }
+  const d = trend || { dates: ['—'], values: [0] };
+  trendChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: d.dates,
+      datasets: [{
+        data: d.values,
+        borderColor: '#f5a623', backgroundColor: 'rgba(245,166,35,.07)',
+        borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#f5a623',
+        pointBorderColor: '#0d0e10', pointBorderWidth: 2,
+        fill: true, tension: 0.35,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#21242b', borderColor: 'rgba(255,255,255,.1)',
+          borderWidth: 1, titleColor: '#9a9ca3', bodyColor: '#f5a623',
+          bodyFont: { family: 'IBM Plex Mono', size: 13 },
+          callbacks: { label: c => c.parsed.y.toFixed(1) + '¢/л' }
+        }
+      },
+      scales: {
+        x: { ticks: { color:'#5a5c63', font:{family:'IBM Plex Mono',size:10}, maxRotation:45, autoSkip:false },
+             grid: { color:'rgba(255,255,255,.04)' } },
+        y: { ticks: { color:'#5a5c63', font:{family:'IBM Plex Mono',size:10}, callback: v => v + '¢' },
+             grid: { color:'rgba(255,255,255,.04)' }, min: 155, max: 195 }
+      }
+    }
+  });
+}
+
+// ── CALC ──
+function updateCalc(minP, maxP) {
+  const vol = parseInt(document.getElementById('tankSlider').value);
+  document.getElementById('tankVal').textContent = vol + ' л';
+  const fuel = document.getElementById('fuelSel').value;
+  if (!allStations.length) return;
+  const prices = allStations.map(s => getPrice(s, fuel));
+  const best  = minP ?? Math.min(...prices);
+  const worst = maxP ?? Math.max(...prices);
+  const avg   = meta.avgPrice || (prices.reduce((a,b)=>a+b,0)/prices.length);
+  const tmrw  = meta.forecast?.tomorrow || (best - 15);
+  document.getElementById('s1').textContent = '$' + ((avg - best) * vol / 100).toFixed(2);
+  document.getElementById('s2').textContent = '$' + ((worst - best) * vol / 100).toFixed(2);
+  document.getElementById('s3').textContent = '$' + (best * vol / 100).toFixed(2);
+  document.getElementById('s4').textContent = '$' + (tmrw * vol / 100).toFixed(2);
+}
+
+// ── SCRAPER LOG ──
+function addLog(msg, level = 'info') {
+  const log = document.getElementById('scraperLog');
+  const t = new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const cls = level === 'ok' ? 'log-ok' : level === 'warn' ? 'log-warn' : level === 'err' ? 'log-err' : '';
+  const div = document.createElement('div');
+  div.className = 'log-line';
+  div.innerHTML = `<span class="log-time">${t}</span><span class="${cls}">${msg}</span>`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ── CLOCK ──
+function tick() { document.getElementById('clock').textContent = new Date().toLocaleTimeString('ru-RU'); }
+setInterval(tick, 1000); tick();
+
+// ── AUTO POLL ──
+setInterval(loadData, 5 * 60 * 1000);  // каждые 5 минут
+
+// ── INIT ──
+addLog('Инициализация дашборда...', 'info');
+addLog(`Подключение к API: ${API}`, 'info');
+loadData();
+</script>
+</body>
+</html>
